@@ -273,4 +273,3 @@ jobs:
             android-kernel/out/arch/arm64/boot/Image
             android-kernel/out/arch/arm64/boot/dts/vendor/qcom/*.dtb
             android-kernel/out/arch/arm64/boot/dtbo.img
-            
