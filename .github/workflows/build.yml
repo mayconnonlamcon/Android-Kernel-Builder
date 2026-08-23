@@ -3,6 +3,12 @@ name: "Build kernels"
 on:
   workflow_dispatch:
     inputs:
+      kernel_name:
+        description: 'Kernel name'
+        required: true
+        type: string
+        default: '-CustomKernel'
+
       build_none:
         description: 'Build: none (baseline no-root)'
         required: false
@@ -97,8 +103,9 @@ on:
 
 env:
   OUT_DIR: "out"
-  ARCH: "arm64" # Bạn có thể thay đổi hoặc cho nhập từ input nếu cần
-  DEFCONFIG_NAME: "vendor/marble_defconfig" # Thay đổi tên defconfig phù hợp với device của bạn
+  ARCH: "arm64"
+  # QUAN TRỌNG: Hãy chắc chắn tên defconfig này đúng với kernel của bạn!
+  DEFCONFIG_NAME: "vendor/marble_defconfig" 
 
 jobs:
   Build-Kernel:
@@ -112,7 +119,7 @@ jobs:
       - name: "Install prerequisites"
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc curl git zip ftp gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev lftp zstd wget libfl-dev python2 python3 libarchive-tools ccache
+          sudo apt-get install -y build-essential bc curl git zip ftp gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev lftp zstd wget libfl-dev python3 python-is-python3 libarchive-tools ccache
 
       - name: "Clone kernel source"
         run: |
@@ -129,7 +136,6 @@ jobs:
             echo "Selected: Build none. Skipping KernelSU."
           else
             echo "Setting up root variant..."
-            # Dọn dẹp thư mục cũ (nếu có)
             rm -rf KernelSU drivers/kernelsu
             
             if [ "${{ github.event.inputs.build_ksu }}" == "true" ]; then
@@ -144,7 +150,6 @@ jobs:
                curl -LSs "https://raw.githubusercontent.com/terebiko/KittiSU/main/kernel/setup.sh" | bash -s main
             fi
             
-            # Cấu hình Kprobes
             echo -e "\nCONFIG_KPROBES=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
             echo -e "\nCONFIG_HAVE_KPROBES=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
             echo -e "\nCONFIG_KPROBE_EVENTS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
@@ -154,8 +159,7 @@ jobs:
         working-directory: ./android-kernel
         if: ${{ github.event.inputs.build_none != 'true' && github.event.inputs.enable_susfs == 'true' }}
         run: |
-           echo "Setting up SUSFS..."
-           # Thêm script apply SUSFS patch vào kernel ở đây
+           echo "SUSFS is enabled but script is missing. Add your SUSFS patch script here."
 
       - name: "Make defconfig"
         working-directory: ./android-kernel
@@ -166,18 +170,18 @@ jobs:
         working-directory: ./android-kernel
         run: |
           if [ "${{ github.event.inputs.enable_ccache }}" == "true" ]; then
-            echo "Using ccache..."
             CC="ccache gcc"
           else
             CC="gcc"
           fi
           
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- CC="$CC"
+          # Biến LOCALVERSION sẽ đổi tên kernel theo thông tin bạn nhập
+          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- CC="$CC" LOCALVERSION="${{ github.event.inputs.kernel_name }}"
 
       - name: "Upload Image"
         uses: actions/upload-artifact@v4
         with:
-          name: Image
+          name: Image${{ github.event.inputs.kernel_name }}
           path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/Image
           if-no-files-found: ignore
           retention-days: 7
@@ -185,7 +189,7 @@ jobs:
       - name: "Upload dtb"
         uses: actions/upload-artifact@v4
         with:
-          name: dtb
+          name: dtb${{ github.event.inputs.kernel_name }}
           path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dts/**/*.dtb
           if-no-files-found: ignore
           retention-days: 7
