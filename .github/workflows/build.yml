@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Kernel name'
+        description: 'Tên Kernel của bạn (Ví dụ: -QuyenKernel)'
         required: true
         type: string
         default: '-CustomKernel'
@@ -61,9 +61,10 @@ on:
           - 'gki-android14-6.1'
           - 'gki-android13-5.10'
           - 'gki-android13-5.15'
+          - 'gki-android12-5.10'
 
       susfs_custom:
-        description: 'Custom SUSFS branch'
+        description: 'Tự gõ tên branch SUSFS muốn dùng (Ưu tiên hơn menu trên, để trống nếu dùng menu)'
         required: false
         type: string
         default: ''
@@ -160,38 +161,80 @@ jobs:
             echo -e "\nCONFIG_KPROBE_EVENTS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           fi
 
-      - name: "Setup and Apply SUSFS"
+      - name: "Setup and Apply SUSFS (DEBUG MODE)"
         working-directory: ./android-kernel
         if: ${{ github.event.inputs.build_none != 'true' && github.event.inputs.enable_susfs == 'true' }}
         run: |
-          # Nếu có nhập ô custom thì lấy ô custom, không thì lấy từ menu
+          set -x
           if [ -n "${{ github.event.inputs.susfs_custom }}" ]; then
             SUSFS_VER="${{ github.event.inputs.susfs_custom }}"
           else
             SUSFS_VER="${{ github.event.inputs.susfs_version }}"
           fi
           
-          echo "Cloning susfs4ksu from GitLab (branch/tag: $SUSFS_VER)..."
+          echo "=== [DEBUG] Starting SUSFS setup for branch/tag: $SUSFS_VER ==="
+          rm -rf ../susfs4ksu
           git clone --depth=1 -b "$SUSFS_VER" https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
           
-          echo "Copying SUSFS patches..."
-          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
-          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-.patch ./
-          cp ../susfs4ksu/kernel_patches/fs/* ./fs/
-          cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          echo "=== [DEBUG] Listing directory structure of ../susfs4ksu ==="
+          find ../susfs4ksu -maxdepth 4 -not -path '*/.*'
           
-          echo "Applying patch to KernelSU..."
+          echo "=== [DEBUG] Finding all patch files ==="
+          find ../susfs4ksu -name "*.patch"
+          
+          echo "=== [DEBUG] Locating specific patches dynamically ==="
+          KSU_PATCH=$(find ../susfs4ksu -name "*10_enable_susfs_for_ksu.patch" | head -n 1)
+          KERNEL_PATCH=$(find ../susfs4ksu -name "*50_add_susfs_in_kernel*" | head -n 1)
+          
+          echo "Found KSU patch path: $KSU_PATCH"
+          echo "Found Kernel patch path: $KERNEL_PATCH"
+          
+          if [ -f "$KSU_PATCH" ]; then
+            cp "$KSU_PATCH" ./KernelSU/
+          else
+            echo "[WARNING] Could not find 10_enable_susfs_for_ksu.patch automatically!"
+          fi
+          
+          if [ -f "$KERNEL_PATCH" ]; then
+            cp "$KERNEL_PATCH" ./50_add_susfs_in_kernel-.patch
+          else
+            echo "[WARNING] Could not find kernel patch automatically!"
+          fi
+          
+          echo "=== [DEBUG] Copying fs and include components ==="
+          FS_DIR=$(find ../susfs4ksu -type d -name "fs" | head -n 1)
+          if [ -d "$FS_DIR" ]; then
+            cp -r "$FS_DIR"/* ./fs/ || true
+          fi
+          
+          INCLUDE_DIR=$(find ../susfs4ksu -type d -name "include" | head -n 1)
+          if [ -d "$INCLUDE_DIR" ]; then
+            cp -r "$INCLUDE_DIR"/* ./include/ || true
+          fi
+          
+          echo "=== [DEBUG] Applying KSU patch (with dry-run test) ==="
           cd KernelSU
-          patch -p1 < 10_enable_susfs_for_ksu.patch || true
+          if [ -f "10_enable_susfs_for_ksu.patch" ]; then
+            patch -p1 --dry-run < 10_enable_susfs_for_ksu.patch || echo "[DRY-RUN FAILED] KSU patch has conflicts or issues"
+            patch -p1 < 10_enable_susfs_for_ksu.patch || true
+          else
+            echo "[ERROR] Patch file missing inside KernelSU folder"
+          fi
           cd ..
           
-          echo "Applying patch to Kernel source..."
-          patch -p1 < 50_add_susfs_in_kernel-.patch || true
+          echo "=== [DEBUG] Applying Kernel source patch (with dry-run test) ==="
+          if [ -f "50_add_susfs_in_kernel-.patch" ]; then
+            patch -p1 --dry-run < 50_add_susfs_in_kernel-.patch || echo "[DRY-RUN FAILED] Kernel patch has conflicts or issues"
+            patch -p1 < 50_add_susfs_in_kernel-.patch || true
+          else
+            echo "[ERROR] Kernel patch file missing"
+          fi
           
-          echo "Enabling SUSFS configs..."
+          echo "=== [DEBUG] Appending SUSFS configs ==="
           echo -e "\nCONFIG_KSU_SUSFS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "\nCONFIG_KSU_SUSFS_HAS_ALLOWED_PATH_REG=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           echo -e "\nCONFIG_KSU_SUSFS_HAS_OPEN_REDIRECT=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          echo "=== [DEBUG] SUSFS setup step completed ==="
 
       - name: "Make defconfig"
         working-directory: ./android-kernel
