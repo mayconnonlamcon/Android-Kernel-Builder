@@ -52,17 +52,18 @@ on:
         default: true
 
       susfs_version:
-        description: 'SUSFS preset version'
+        description: 'SUSFS preset version (nếu ô custom bên dưới trống)'
         required: true
         type: choice
-        default: 'v1.5.5'
+        default: 'gki-android14-5.10'
         options:
-          - 'v2.2.0'
-          - 'v1.5.5'
-          - 'v1.5.2'
+          - 'gki-android14-5.10'
+          - 'gki-android14-6.1'
+          - 'gki-android13-5.10'
+          - 'gki-android13-5.15'
 
       susfs_custom:
-        description: 'SUSFS branch/tag/commit (only for custom version)'
+        description: 'Custom SUSFS branch'
         required: false
         type: string
         default: ''
@@ -163,9 +164,15 @@ jobs:
         working-directory: ./android-kernel
         if: ${{ github.event.inputs.build_none != 'true' && github.event.inputs.enable_susfs == 'true' }}
         run: |
-          echo "Cloning susfs4ksu repository..."
-          SUSFS_VER="${{ github.event.inputs.susfs_version }}"
-          git clone --depth=1 https://github.com/simonpunk/susfs4ksu.git ../susfs4ksu
+          # Nếu có nhập ô custom thì lấy ô custom, không thì lấy từ menu
+          if [ -n "${{ github.event.inputs.susfs_custom }}" ]; then
+            SUSFS_VER="${{ github.event.inputs.susfs_custom }}"
+          else
+            SUSFS_VER="${{ github.event.inputs.susfs_version }}"
+          fi
+          
+          echo "Cloning susfs4ksu from GitLab (branch/tag: $SUSFS_VER)..."
+          git clone --depth=1 -b "$SUSFS_VER" https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
           
           echo "Copying SUSFS patches..."
           cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
@@ -220,3 +227,4 @@ jobs:
           path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dts/**/*.dtb
           if-no-files-found: ignore
           retention-days: 7
+          
