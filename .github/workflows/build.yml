@@ -8,136 +8,15 @@ on:
         required: false
         type: string
         default: "-CustomKernel"
-      build_none:
-        description: "Build: none (baseline no-root)"
-        type: boolean
-        default: false
-      build_kernelsu:
-        description: "Build: KernelSU (no SUSFS)"
-        type: boolean
-        default: false
-      build_kernelsu_next:
-        description: "Build: KernelSU-Next"
-        type: boolean
-        default: false
-      build_sukisu_ultra:
-        description: "Build: SukiSU Ultra"
-        type: boolean
-        default: false
-      build_resukisu:
-        description: "Build: ReSukiSU"
-        type: boolean
-        default: false
-      build_kittisu:
-        description: "Build: KittiSU"
-        type: boolean
-        default: false
-      enable_susfs:
-        description: "Enable SUSFS"
-        type: boolean
-        default: false
-      susfs_version:
-        description: "SUSFS preset version"
-        type: choice
-        default: v2.2.0
-        options:
-          - v2.2.0
-          - v2.1.0
-          - custom
-      susfs_ref:
-        description: "SUSFS custom ref"
-        required: false
-        default: ""
-      source_repo:
-        description: "Kernel source repository"
-        required: true
-        default: Pzqqt/android_kernel_xiaomi_marble
-      source_ref:
-        description: "Kernel source branch"
-        required: true
-        default: melt-rebase
-      build_scope:
-        description: "Build scope"
-        type: choice
-        default: image-only
-        options:
-          - image-only
-          - full
-      enable_ccache:
-        description: "Enable ccache"
-        type: boolean
-        default: true
-      create_draft_release:
-        description: "Create draft release"
-        type: boolean
-        default: false
-
-permissions:
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
-  setup:
-    name: Generate matrix
-    runs-on: ubuntu-22.04
-    outputs:
-      matrix: ${{ steps.gen.outputs.matrix }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Generate build matrix
-        id: gen
-        run: |
-          JSON="["
-          COMMA=""
-          if [ "${{ github.event.inputs.build_none }}" == "true" ]; then
-            JSON="$JSON{\"manager\":\"none\",\"susfs\":false}"
-            COMMA=","
-          fi
-          if [ "${{ github.event.inputs.build_kernelsu }}" == "true" ]; then
-            JSON="$JSON$COMMA{\"manager\":\"kernelsu\",\"susfs\":false}"
-            COMMA=","
-          fi
-          if [ "${{ github.event.inputs.build_kernelsu_next }}" == "true" ]; then
-            JSON="$JSON$COMMA{\"manager\":\"kernelsu-next\",\"susfs\":${{ github.event.inputs.enable_susfs }}}"
-            COMMA=","
-          fi
-          if [ "${{ github.event.inputs.build_sukisu_ultra }}" == "true" ]; then
-            JSON="$JSON$COMMA{\"manager\":\"sukisu-ultra\",\"susfs\":${{ github.event.inputs.enable_susfs }}}"
-            COMMA=","
-          fi
-          if [ "${{ github.event.inputs.build_resukisu }}" == "true" ]; then
-            JSON="$JSON$COMMA{\"manager\":\"resukisu\",\"susfs\":${{ github.event.inputs.enable_susfs }}}"
-            COMMA=","
-          fi
-          if [ "${{ github.event.inputs.build_kittisu }}" == "true" ]; then
-            JSON="$JSON$COMMA{\"manager\":\"kittisu\",\"susfs\":${{ github.event.inputs.enable_susfs }}}"
-          fi
-          JSON="$JSON]"
-          echo "matrix={\"include\":$JSON}" >> $GITHUB_OUTPUT
-
   build:
-    name: Build (${{ matrix.manager }} | SUSFS: ${{ matrix.susfs }})
-    needs: setup
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
-
-    env:
-      OUT_DIR: "out"
-      ARCH: "arm64"
-      DEFCONFIG_NAME: "vendor/marble_defconfig"
-
     steps:
       - name: Install prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc curl git zip ftp gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev lftp zstd wget libfl-dev python3 python-is-python3 libarchive-tools ccache
+          sudo apt-get install -y build-essential bc curl git gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev zstd wget
 
       - name: Clone Toolchain
         run: |
@@ -145,92 +24,20 @@ jobs:
 
       - name: Clone kernel source
         run: |
-          git clone --depth=1 -b "${{ github.event.inputs.source_ref }}" "https://github.com/${{ github.event.inputs.source_repo }}.git" android-kernel
-
-      - name: Setup Manager and SUSFS
-        working-directory: ./android-kernel
-        run: |
-          MANAGER="${{ matrix.manager }}"
-          USE_SUSFS="${{ matrix.susfs }}"
-          
-          if [ "$MANAGER" != "none" ]; then
-            echo "Setting up root manager: $MANAGER"
-            rm -rf KernelSU drivers/kernelsu
-            
-            case "$MANAGER" in
-              kernelsu)
-                curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-                ;;
-              kernelsu-next)
-                curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/main/kernel/setup.sh" | bash -s main
-                ;;
-              sukisu-ultra)
-                curl -LSs "https://raw.githubusercontent.com/sukisu-ultra/sukisu-ultra/main/kernel/setup.sh" | bash -s main
-                ;;
-              resukisu)
-                curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
-                ;;
-              kittisu)
-                curl -LSs "https://raw.githubusercontent.com/terebiko/KittiSU/main/kernel/setup.sh" | bash -s main
-                ;;
-            esac
-            
-            echo -e "\nCONFIG_KPROBES=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-            echo -e "\nCONFIG_HAVE_KPROBES=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-            echo -e "\nCONFIG_KPROBE_EVENTS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          fi
-          
-          if [ "$USE_SUSFS" == "true" ] && [ "$MANAGER" != "none" ]; then
-            SUSFS_BRANCH="${{ github.event.inputs.susfs_version }}"
-            if [ "$SUSFS_BRANCH" == "custom" ] && [ -n "${{ github.event.inputs.susfs_ref }}" ]; then
-              SUSFS_BRANCH="${{ github.event.inputs.susfs_ref }}"
-            fi
-            
-            git clone --depth=1 -b "$SUSFS_BRANCH" https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu || git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
-            
-            KSU_PATCH=$(find ../susfs4ksu -name "*enable_susfs*" | head -n 1)
-            KERNEL_PATCH=$(find ../susfs4ksu -name "*add_susfs_in_kernel*" | head -n 1)
-            
-            [ -f "$KSU_PATCH" ] && cp "$KSU_PATCH" ./KernelSU/10_enable_susfs_for_ksu.patch
-            [ -f "$KERNEL_PATCH" ] && cp "$KERNEL_PATCH" ./50_add_susfs_in_kernel.patch
-            
-            FS_DIR=$(find ../susfs4ksu -type d -name "fs" | head -n 1)
-            [ -d "$FS_DIR" ] && cp -r "$FS_DIR"/* ./fs/ || true
-            
-            INCLUDE_DIR=$(find ../susfs4ksu -type d -name "include" | head -n 1)
-            [ -d "$INCLUDE_DIR" ] && cp -r "$INCLUDE_DIR"/* ./include/ || true
-            
-            if [ -d "KernelSU" ] && [ -f "KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-              cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch || true
-              cd ..
-            fi
-            
-            [ -f "50_add_susfs_in_kernel.patch" ] && patch -p1 < 50_add_susfs_in_kernel.patch || true
-            
-            echo -e "\nCONFIG_KSU_SUSFS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-            echo -e "\nCONFIG_KSU_SUSFS_HAS_ALLOWED_PATH_REG=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-            echo -e "\nCONFIG_KSU_SUSFS_HAS_OPEN_REDIRECT=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          fi
-
-      - name: Make defconfig
-        working-directory: ./android-kernel
-        run: |
-          export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang ${{ env.DEFCONFIG_NAME }}
+          git clone --depth=1 -b melt-rebase https://github.com/Pzqqt/android_kernel_xiaomi_marble.git android-kernel
 
       - name: Build kernel
         working-directory: ./android-kernel
         run: |
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
-          CCACHE_BIN=""
-          [ "${{ github.event.inputs.enable_ccache }}" == "true" ] && CCACHE_BIN="ccache"
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC="$CCACHE_BIN clang" LOCALVERSION="${{ github.event.inputs.kernel_name }}"
+          make O=out ARCH=arm64 vendor/marble_defconfig
+          make -j$(nproc --all) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang LOCALVERSION="${{ github.event.inputs.kernel_name }}"
 
-      - name: Upload Artifact
+      - name: Upload Image Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}{{ github.event.inputs.kernel_name }}
-          path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/Image
+          name: Image-${{ github.event.inputs.kernel_name }}
+          path: ./android-kernel/out/arch/arm64/boot/Image
           if-no-files-found: ignore
           retention-days: 7
           
