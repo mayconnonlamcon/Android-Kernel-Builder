@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Tên Kernel của bạn (Ví dụ: -QuyenKernel)'
+        description: 'Kernel name'
         required: true
         type: string
         default: '-CustomKernel'
@@ -49,13 +49,13 @@ on:
         description: 'Enable SUSFS (applies to KSUNext, SukiSU Ultra, ReSukiSU, KittiSU)'
         required: false
         type: boolean
-        default: false
+        default: true
 
       susfs_version:
         description: 'SUSFS preset version'
         required: true
         type: choice
-        default: 'v2.2.0'
+        default: 'v1.5.5'
         options:
           - 'v2.2.0'
           - 'v1.5.5'
@@ -109,7 +109,7 @@ env:
 jobs:
   Build-Kernel:
     name: "Build kernel"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 
     
     steps:
       - name: "Checkout"
@@ -159,11 +159,32 @@ jobs:
             echo -e "\nCONFIG_KPROBE_EVENTS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           fi
 
-      - name: "Setup SUSFS (If enabled)"
+      - name: "Setup and Apply SUSFS"
         working-directory: ./android-kernel
         if: ${{ github.event.inputs.build_none != 'true' && github.event.inputs.enable_susfs == 'true' }}
         run: |
-           echo "SUSFS is enabled but script is missing. Add your SUSFS patch script here."
+          echo "Cloning susfs4ksu repository..."
+          SUSFS_VER="${{ github.event.inputs.susfs_version }}"
+          git clone --depth=1 https://github.com/simonpunk/susfs4ksu.git ../susfs4ksu
+          
+          echo "Copying SUSFS patches..."
+          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-.patch ./
+          cp ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          
+          echo "Applying patch to KernelSU..."
+          cd KernelSU
+          patch -p1 < 10_enable_susfs_for_ksu.patch || true
+          cd ..
+          
+          echo "Applying patch to Kernel source..."
+          patch -p1 < 50_add_susfs_in_kernel-.patch || true
+          
+          echo "Enabling SUSFS configs..."
+          echo -e "\nCONFIG_KSU_SUSFS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          echo -e "\nCONFIG_KSU_SUSFS_HAS_ALLOWED_PATH_REG=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          echo -e "\nCONFIG_KSU_SUSFS_HAS_OPEN_REDIRECT=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
 
       - name: "Make defconfig"
         working-directory: ./android-kernel
