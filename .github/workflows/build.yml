@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Kernel name'
+        description: 'Tên Kernel của bạn (Ví dụ: -QuyenKernel)'
         required: true
         type: string
         default: '-CustomKernel'
@@ -104,7 +104,6 @@ on:
 env:
   OUT_DIR: "out"
   ARCH: "arm64"
-  # QUAN TRỌNG: Hãy chắc chắn tên defconfig này đúng với kernel của bạn!
   DEFCONFIG_NAME: "vendor/marble_defconfig" 
 
 jobs:
@@ -121,6 +120,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential bc curl git zip ftp gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev lftp zstd wget libfl-dev python3 python-is-python3 libarchive-tools ccache
 
+      - name: "Clone Toolchain (Proton Clang)"
+        run: |
+          echo "Downloading Proton Clang Toolchain..."
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain
+          
       - name: "Clone kernel source"
         run: |
           echo "Downloading Kernel Source..."
@@ -164,19 +168,21 @@ jobs:
       - name: "Make defconfig"
         working-directory: ./android-kernel
         run: |
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- ${{ env.DEFCONFIG_NAME }}
+          export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
+          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang ${{ env.DEFCONFIG_NAME }}
 
       - name: "Build kernel"
         working-directory: ./android-kernel
         run: |
+          export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
+          
           if [ "${{ github.event.inputs.enable_ccache }}" == "true" ]; then
-            CC="ccache gcc"
+            CCACHE="ccache"
           else
-            CC="gcc"
+            CCACHE=""
           fi
           
-          # Biến LOCALVERSION sẽ đổi tên kernel theo thông tin bạn nhập
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- CC="$CC" LOCALVERSION="${{ github.event.inputs.kernel_name }}"
+          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC="$CCACHE clang" LOCALVERSION="${{ github.event.inputs.kernel_name }}"
 
       - name: "Upload Image"
         uses: actions/upload-artifact@v4
