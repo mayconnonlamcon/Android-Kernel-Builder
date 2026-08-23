@@ -1,273 +1,252 @@
-name: "Build kernels"
+name: Build Marble Kernel
 
 on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Tên Kernel của bạn (Ví dụ: -QuyenKernel)'
-        required: true
+        description: "Kernel name prefix"
+        required: false
         type: string
-        default: '-CustomKernel'
-
+        default: "-tungtx"
       build_none:
-        description: 'Build: none (baseline no-root)'
-        required: false
+        description: "Build: none (baseline no-root)"
         type: boolean
         default: false
-
-      build_ksu:
-        description: 'Build: KernelSU (no SUSFS)'
-        required: false
+      build_kernelsu:
+        description: "Build: KernelSU (no SUSFS)"
         type: boolean
         default: false
-
-      build_ksu_next:
-        description: 'Build: KernelSU-Next'
-        required: false
+      build_kernelsu_next:
+        description: "Build: KernelSU-Next"
         type: boolean
         default: false
-
       build_sukisu_ultra:
-        description: 'Build: SukiSU Ultra'
-        required: false
+        description: "Build: SukiSU Ultra"
         type: boolean
         default: false
-
       build_resukisu:
-        description: 'Build: ReSukiSU'
-        required: false
+        description: "Build: ReSukiSU"
         type: boolean
         default: false
-
       build_kittisu:
-        description: 'Build: KittiSU'
-        required: false
+        description: "Build: KittiSU"
         type: boolean
         default: false
-
       enable_susfs:
-        description: 'Enable SUSFS (applies to KSUNext, SukiSU Ultra, ReSukiSU, KittiSU)'
-        required: false
+        description: "Enable SUSFS (applies to KSUNext, SukiSU Ultra, ReSukiSU, KittiSU)"
         type: boolean
-        default: true
-
+        default: false
       susfs_version:
-        description: 'SUSFS preset version (nếu ô custom bên dưới trống)'
-        required: true
+        description: SUSFS preset version
         type: choice
-        default: 'gki-android14-5.10'
+        default: v2.2.0
         options:
-          - 'gki-android14-5.10'
-          - 'gki-android14-6.1'
-          - 'gki-android13-5.10'
-          - 'gki-android13-5.15'
-          - 'gki-android12-5.10'
-
-      susfs_custom:
-        description: 'Tự gõ tên branch SUSFS muốn dùng (Ưu tiên hơn menu trên, để trống nếu dùng menu)'
+          - v2.2.0
+          - v2.1.0
+          - custom
+      susfs_ref:
+        description: "SUSFS branch/tag/commit (only for custom version)"
         required: false
-        type: string
-        default: ''
-
-      kernel_repo:
-        description: 'Kernel source repository'
+        default: ""
+      source_repo:
+        description: Kernel source repository
         required: true
-        type: string
-        default: 'Pzqqt/android_kernel_xiaomi_marble'
-
-      kernel_branch:
-        description: 'Kernel source branch, tag, or commit'
+        default: Pzqqt/android_kernel_xiaomi_marble
+      source_ref:
+        description: Kernel source branch, tag, or commit
         required: true
-        type: string
-        default: 'melt-rebase'
-
-      build_target:
-        description: 'Build target set'
-        required: true
+        default: melt-rebase
+      build_scope:
+        description: Build target set
         type: choice
-        default: 'image-only'
+        default: image-only
         options:
-          - 'image-only'
-          - 'anykernel3'
-          - 'boot-img'
-
+          - image-only
+          - full
       enable_ccache:
-        description: 'Enable ccache'
-        required: false
+        description: Enable ccache
         type: boolean
         default: true
-
-      create_release:
-        description: 'Create a draft GitHub release when the build succeeds'
-        required: false
+      create_draft_release:
+        description: Create a draft GitHub release when the build succeeds
         type: boolean
         default: false
 
-env:
-  OUT_DIR: "out"
-  ARCH: "arm64"
-  DEFCONFIG_NAME: "vendor/marble_defconfig" 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.enable_susfs }}-${{ inputs.build_scope }}
+  cancel-in-progress: false
 
 jobs:
-  Build-Kernel:
-    name: "Build kernel"
-    runs-on: ubuntu-22.04 
-    
+  setup:
+    name: Generate matrix and validate policy
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
     steps:
-      - name: "Checkout"
-        uses: actions/checkout@v4
+      - name: Checkout builder
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
-      - name: "Install prerequisites"
+      - name: Validate builder policy
+        run: |
+          if [ -d "tests" ]; then
+            for test_script in tests/test-*.sh; do
+              [ -f "$test_script" ] && bash "${test_script}" || true
+            done
+          fi
+
+      - name: Generate build matrix
+        id: gen
+        run: |
+          JSON="["
+          COMMA=""
+          
+          if [ "${{ inputs.build_none }}" == "true" ]; then
+            JSON="$JSON{\"manager\":\"none\",\"susfs\":false}"
+            COMMA=","
+          fi
+          if [ "${{ inputs.build_kernelsu }}" == "true" ]; then
+            JSON="$JSON$COMMA{\"manager\":\"kernelsu\",\"susfs\":false}"
+            COMMA=","
+          fi
+          if [ "${{ inputs.build_kernelsu_next }}" == "true" ]; then
+            JSON="$JSON$COMMA{\"manager\":\"kernelsu-next\",\"susfs\":${{ inputs.enable_susfs }}}"
+            COMMA=","
+          fi
+          if [ "${{ inputs.build_sukisu_ultra }}" == "true" ]; then
+            JSON="$JSON$COMMA{\"manager\":\"sukisu-ultra\",\"susfs\":${{ inputs.enable_susfs }}}"
+            COMMA=","
+          fi
+          if [ "${{ inputs.build_resukisu }}" == "true" ]; then
+            JSON="$JSON$COMMA{\"manager\":\"resukisu\",\"susfs\":${{ inputs.enable_susfs }}}"
+            COMMA=","
+          fi
+          if [ "${{ inputs.build_kittisu }}" == "true" ]; then
+            JSON="$JSON$COMMA{\"manager\":\"kittisu\",\"susfs\":${{ inputs.enable_susfs }}}"
+          fi
+          
+          JSON="$JSON]"
+          echo "matrix={\"include\":$JSON}" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build (${{ matrix.manager }} | SUSFS: ${{ matrix.susfs }})
+    needs: setup
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    env:
+      OUT_DIR: "out"
+      ARCH: "arm64"
+      DEFCONFIG_NAME: "vendor/marble_defconfig"
+
+    steps:
+      - name: Install prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc curl git zip ftp gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev lftp zstd wget libfl-dev python3 python-is-python3 libarchive-tools ccache
 
-      - name: "Clone Toolchain (Proton Clang)"
+      - name: Clone Toolchain (Proton Clang)
         run: |
-          echo "Downloading Proton Clang Toolchain..."
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain
-          
-      - name: "Clone kernel source"
-        run: |
-          echo "Downloading Kernel Source..."
-          KERNEL_REPO="https://github.com/${{ github.event.inputs.kernel_repo }}.git"
-          KERNEL_BRANCH="${{ github.event.inputs.kernel_branch }}"
-          
-          git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" android-kernel
 
-      - name: "Update KernelSU or Variants"
+      - name: Clone kernel source
+        run: |
+          git clone --depth=1 -b "${{ inputs.source_ref }}" "https://github.com/${{ inputs.source_repo }}.git" android-kernel
+
+      - name: Setup Manager and SUSFS
         working-directory: ./android-kernel
         run: |
-          if [ "${{ github.event.inputs.build_none }}" == "true" ]; then
-            echo "Selected: Build none. Skipping KernelSU."
-          else
-            echo "Setting up root variant..."
+          MANAGER="${{ matrix.manager }}"
+          USE_SUSFS="${{ matrix.susfs }}"
+          
+          if [ "$MANAGER" != "none" ]; then
+            echo "Setting up root manager: $MANAGER"
             rm -rf KernelSU drivers/kernelsu
             
-            if [ "${{ github.event.inputs.build_ksu }}" == "true" ]; then
-               curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-            elif [ "${{ github.event.inputs.build_ksu_next }}" == "true" ]; then
-               curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/main/kernel/setup.sh" | bash -s main
-            elif [ "${{ github.event.inputs.build_sukisu_ultra }}" == "true" ]; then
-               curl -LSs "https://raw.githubusercontent.com/sukisu-ultra/sukisu-ultra/main/kernel/setup.sh" | bash -s main
-            elif [ "${{ github.event.inputs.build_resukisu }}" == "true" ]; then
-               curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
-            elif [ "${{ github.event.inputs.build_kittisu }}" == "true" ]; then
-               curl -LSs "https://raw.githubusercontent.com/terebiko/KittiSU/main/kernel/setup.sh" | bash -s main
-            fi
+            case "$MANAGER" in
+              kernelsu)
+                curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+                ;;
+              kernelsu-next)
+                curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/main/kernel/setup.sh" | bash -s main
+                ;;
+              sukisu-ultra)
+                curl -LSs "https://raw.githubusercontent.com/sukisu-ultra/sukisu-ultra/main/kernel/setup.sh" | bash -s main
+                ;;
+              resukisu)
+                curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+                ;;
+              kittisu)
+                curl -LSs "https://raw.githubusercontent.com/terebiko/KittiSU/main/kernel/setup.sh" | bash -s main
+                ;;
+            esac
             
             echo -e "\nCONFIG_KPROBES=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
             echo -e "\nCONFIG_HAVE_KPROBES=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
             echo -e "\nCONFIG_KPROBE_EVENTS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           fi
+          
+          if [ "$USE_SUSFS" == "true" ] && [ "$MANAGER" != "none" ]; then
+            SUSFS_BRANCH="${{ inputs.susfs_version }}"
+            if [ "$SUSFS_BRANCH" == "custom" ] && [ -n "${{ inputs.susfs_ref }}" ]; then
+              SUSFS_BRANCH="${{ inputs.susfs_ref }}"
+            fi
+            
+            echo "Applying SUSFS version: $SUSFS_BRANCH"
+            git clone --depth=1 -b "$SUSFS_BRANCH" https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu || git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+            
+            KSU_PATCH=$(find ../susfs4ksu -name "*enable_susfs*" | head -n 1)
+            KERNEL_PATCH=$(find ../susfs4ksu -name "*add_susfs_in_kernel*" | head -n 1)
+            
+            [ -f "$KSU_PATCH" ] && cp "$KSU_PATCH" ./KernelSU/10_enable_susfs_for_ksu.patch
+            [ -f "$KERNEL_PATCH" ] && cp "$KERNEL_PATCH" ./50_add_susfs_in_kernel.patch
+            
+            FS_DIR=$(find ../susfs4ksu -type d -name "fs" | head -n 1)
+            [ -d "$FS_DIR" ] && cp -r "$FS_DIR"/* ./fs/ || true
+            
+            INCLUDE_DIR=$(find ../susfs4ksu -type d -name "include" | head -n 1)
+            [ -d "$INCLUDE_DIR" ] && cp -r "$INCLUDE_DIR"/* ./include/ || true
+            
+            if [ -d "KernelSU" ] && [ -f "KernelSU/10_enable_susfs_for_ksu.patch" ]; then
+              cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch || true
+              cd ..
+            fi
+            
+            [ -f "50_add_susfs_in_kernel.patch" ] && patch -p1 < 50_add_susfs_in_kernel.patch || true
+            
+            echo -e "\nCONFIG_KSU_SUSFS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            echo -e "\nCONFIG_KSU_SUSFS_HAS_ALLOWED_PATH_REG=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            echo -e "\nCONFIG_KSU_SUSFS_HAS_OPEN_REDIRECT=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          fi
 
-      - name: "Setup and Apply SUSFS (DEBUG MODE)"
-        working-directory: ./android-kernel
-        if: ${{ github.event.inputs.build_none != 'true' && github.event.inputs.enable_susfs == 'true' }}
-        run: |
-          set -x
-          if [ -n "${{ github.event.inputs.susfs_custom }}" ]; then
-            SUSFS_VER="${{ github.event.inputs.susfs_custom }}"
-          else
-            SUSFS_VER="${{ github.event.inputs.susfs_version }}"
-          fi
-          
-          echo "=== [DEBUG] Starting SUSFS setup for branch/tag: $SUSFS_VER ==="
-          rm -rf ../susfs4ksu
-          git clone --depth=1 -b "$SUSFS_VER" https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
-          
-          echo "=== [DEBUG] Listing directory structure of ../susfs4ksu ==="
-          find ../susfs4ksu -maxdepth 4 -not -path '*/.*'
-          
-          echo "=== [DEBUG] Finding all patch files ==="
-          find ../susfs4ksu -name "*.patch"
-          
-          echo "=== [DEBUG] Locating specific patches dynamically ==="
-          KSU_PATCH=$(find ../susfs4ksu -name "*10_enable_susfs_for_ksu.patch" | head -n 1)
-          KERNEL_PATCH=$(find ../susfs4ksu -name "*50_add_susfs_in_kernel*" | head -n 1)
-          
-          echo "Found KSU patch path: $KSU_PATCH"
-          echo "Found Kernel patch path: $KERNEL_PATCH"
-          
-          if [ -f "$KSU_PATCH" ]; then
-            cp "$KSU_PATCH" ./KernelSU/
-          else
-            echo "[WARNING] Could not find 10_enable_susfs_for_ksu.patch automatically!"
-          fi
-          
-          if [ -f "$KERNEL_PATCH" ]; then
-            cp "$KERNEL_PATCH" ./50_add_susfs_in_kernel-.patch
-          else
-            echo "[WARNING] Could not find kernel patch automatically!"
-          fi
-          
-          echo "=== [DEBUG] Copying fs and include components ==="
-          FS_DIR=$(find ../susfs4ksu -type d -name "fs" | head -n 1)
-          if [ -d "$FS_DIR" ]; then
-            cp -r "$FS_DIR"/* ./fs/ || true
-          fi
-          
-          INCLUDE_DIR=$(find ../susfs4ksu -type d -name "include" | head -n 1)
-          if [ -d "$INCLUDE_DIR" ]; then
-            cp -r "$INCLUDE_DIR"/* ./include/ || true
-          fi
-          
-          echo "=== [DEBUG] Applying KSU patch (with dry-run test) ==="
-          cd KernelSU
-          if [ -f "10_enable_susfs_for_ksu.patch" ]; then
-            patch -p1 --dry-run < 10_enable_susfs_for_ksu.patch || echo "[DRY-RUN FAILED] KSU patch has conflicts or issues"
-            patch -p1 < 10_enable_susfs_for_ksu.patch || true
-          else
-            echo "[ERROR] Patch file missing inside KernelSU folder"
-          fi
-          cd ..
-          
-          echo "=== [DEBUG] Applying Kernel source patch (with dry-run test) ==="
-          if [ -f "50_add_susfs_in_kernel-.patch" ]; then
-            patch -p1 --dry-run < 50_add_susfs_in_kernel-.patch || echo "[DRY-RUN FAILED] Kernel patch has conflicts or issues"
-            patch -p1 < 50_add_susfs_in_kernel-.patch || true
-          else
-            echo "[ERROR] Kernel patch file missing"
-          fi
-          
-          echo "=== [DEBUG] Appending SUSFS configs ==="
-          echo -e "\nCONFIG_KSU_SUSFS=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          echo -e "\nCONFIG_KSU_SUSFS_HAS_ALLOWED_PATH_REG=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          echo -e "\nCONFIG_KSU_SUSFS_HAS_OPEN_REDIRECT=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
-          echo "=== [DEBUG] SUSFS setup step completed ==="
-
-      - name: "Make defconfig"
+      - name: Make defconfig
         working-directory: ./android-kernel
         run: |
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
           make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang ${{ env.DEFCONFIG_NAME }}
 
-      - name: "Build kernel"
+      - name: Build kernel
         working-directory: ./android-kernel
         run: |
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
+          CCACHE_BIN=""
+          [ "${{ inputs.enable_ccache }}" == "true" ] && CCACHE_BIN="ccache"
           
-          if [ "${{ github.event.inputs.enable_ccache }}" == "true" ]; then
-            CCACHE="ccache"
-          else
-            CCACHE=""
-          fi
-          
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC="$CCACHE clang" LOCALVERSION="${{ github.event.inputs.kernel_name }}"
+          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC="$CCACHE_BIN clang" LOCALVERSION="${{ inputs.kernel_name }}"
 
-      - name: "Upload Image"
+      - name: Upload Image Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Image${{ github.event.inputs.kernel_name }}
+          name: Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}${{ inputs.kernel_name }}
           path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/Image
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: "Upload dtb"
-        uses: actions/upload-artifact@v4
-        with:
-          name: dtb${{ github.event.inputs.kernel_name }}
-          path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/dts/**/*.dtb
           if-no-files-found: ignore
           retention-days: 7
           
