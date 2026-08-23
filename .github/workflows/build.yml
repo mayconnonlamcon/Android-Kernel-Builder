@@ -3,6 +3,11 @@ name: Build Marble Kernel
 on:
   workflow_dispatch:
     inputs:
+      kernel_name:
+        description: "Custom Kernel Name"
+        required: false
+        type: string
+        default: "-CustomKernel"
       build_none:
         description: "Build: none (baseline no-root)"
         type: boolean
@@ -263,12 +268,12 @@ jobs:
             make -j$(nproc) O="$OUT_DIR" ARCH="$ARCH" CC=clang ccache-sw=1 || true
           fi
           
-          make -j$(nproc) O="$OUT_DIR" ARCH="$ARCH" CC=clang
+          make -j$(nproc) O="$OUT_DIR" ARCH="$ARCH" CC=clang LOCALVERSION="${{ inputs.kernel_name }}"
 
       - name: Archive Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}
+          name: Kernel-Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}${{ inputs.kernel_name }}
           path: |
             android-kernel/out/arch/arm64/boot/Image
             android-kernel/out/arch/arm64/boot/dts/vendor/qcom/*.dtb
