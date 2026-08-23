@@ -81,14 +81,14 @@ concurrency:
 jobs:
   setup:
     name: Generate matrix and validate policy
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
     steps:
       - name: Checkout builder
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -147,7 +147,7 @@ jobs:
   build:
     name: Build (${{ matrix.manager }} | SUSFS: ${{ matrix.susfs }})
     needs: setup
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
@@ -168,7 +168,7 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      - name: Install Ubuntu 22.04 Dependencies
+      - name: Install Ubuntu Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -229,14 +229,12 @@ jobs:
             
             git clone --depth=1 -b "$SUSFS_BRANCH" https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu || git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
             
-            # Copy fs and include directories
             FS_DIR=$(find ../susfs4ksu -type d -name "fs" | head -n 1)
             [ -d "$FS_DIR" ] && cp -r "$FS_DIR"/* ./fs/ || true
             
             INCLUDE_DIR=$(find ../susfs4ksu -type d -name "include" | head -n 1)
             [ -d "$INCLUDE_DIR" ] && cp -r "$INCLUDE_DIR"/* ./include/ || true
             
-            # Tự động quét và apply toàn bộ tất cả các patch của susfs4ksu
             for patch_file in $(find ../susfs4ksu -name "*.patch" | sort); do
               echo "Applying patch: $patch_file"
               if [[ "$patch_file" == *"kernelsu"* || "$patch_file" == *"ksu"* ]] && [ -d "KernelSU" ]; then
@@ -253,24 +251,26 @@ jobs:
             echo -e "\nCONFIG_KSU_SUSFS_HAS_OPEN_REDIRECT=y" >> ./arch/${{ env.ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
           fi
 
-      - name: Make defconfig
+      - name: Build Kernel Image
         working-directory: ./android-kernel
         run: |
-          export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang ${{ env.DEFCONFIG_NAME }}
+          PATH="$(pwd)/toolchain/bin:$PATH"
+          export PATH
+          
+          make O="$OUT_DIR" ARCH="$ARCH" CC=clang "$DEFCONFIG_NAME"
+          
+          if [ "${{ inputs.enable_ccache }}" == "true" ]; then
+            make -j$(nproc) O="$OUT_DIR" ARCH="$ARCH" CC=clang ccache-sw=1 || true
+          fi
+          
+          make -j$(nproc) O="$OUT_DIR" ARCH="$ARCH" CC=clang
 
-      - name: Build kernel
-        working-directory: ./android-kernel
-        run: |
-          export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
-          CCACHE_BIN=""
-          [ "${{ inputs.enable_ccache }}" == "true" ] && CCACHE_BIN="ccache"
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC="$CCACHE_BIN clang"
-
-      - name: Upload Image Artifact
+      - name: Archive Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}
-          path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/Image
-          if-no-files-found: ignore
-          retention-days: 7
+          name: Kernel-Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}
+          path: |
+            android-kernel/out/arch/arm64/boot/Image
+            android-kernel/out/arch/arm64/boot/dts/vendor/qcom/*.dtb
+            android-kernel/out/arch/arm64/boot/dtbo.img
+            
