@@ -94,28 +94,28 @@ jobs:
         run: |
           JSON="["
           COMMA=""
-          if [ "${{ inputs.build_none }}" == "true" ]; then
+          if [ "${{ github.event.inputs.build_none }}" == "true" ]; then
             JSON="$JSON{\"manager\":\"none\",\"susfs\":false}"
             COMMA=","
           fi
-          if [ "${{ inputs.build_kernelsu }}" == "true" ]; then
+          if [ "${{ github.event.inputs.build_kernelsu }}" == "true" ]; then
             JSON="$JSON$COMMA{\"manager\":\"kernelsu\",\"susfs\":false}"
             COMMA=","
           fi
-          if [ "${{ inputs.build_kernelsu_next }}" == "true" ]; then
-            JSON="$JSON$COMMA{\"manager\":\"kernelsu-next\",\"susfs\":${{ inputs.enable_susfs }}}"
+          if [ "${{ github.event.inputs.build_kernelsu_next }}" == "true" ]; then
+            JSON="$JSON$COMMA{\"manager\":\"kernelsu-next\",\"susfs\":${{ github.event.inputs.enable_susfs }}}"
             COMMA=","
           fi
-          if [ "${{ inputs.build_sukisu_ultra }}" == "true" ]; then
-            JSON="$JSON$COMMA{\"manager\":\"sukisu-ultra\",\"susfs\":${{ inputs.enable_susfs }}}"
+          if [ "${{ github.event.inputs.build_sukisu_ultra }}" == "true" ]; then
+            JSON="$JSON$COMMA{\"manager\":\"sukisu-ultra\",\"susfs\":${{ github.event.inputs.enable_susfs }}}"
             COMMA=","
           fi
-          if [ "${{ inputs.build_resukisu }}" == "true" ]; then
-            JSON="$JSON$COMMA{\"manager\":\"resukisu\",\"susfs\":${{ inputs.enable_susfs }}}"
+          if [ "${{ github.event.inputs.build_resukisu }}" == "true" ]; then
+            JSON="$JSON$COMMA{\"manager\":\"resukisu\",\"susfs\":${{ github.event.inputs.enable_susfs }}}"
             COMMA=","
           fi
-          if [ "${{ inputs.build_kittisu }}" == "true" ]; then
-            JSON="$JSON$COMMA{\"manager\":\"kittisu\",\"susfs\":${{ inputs.enable_susfs }}}"
+          if [ "${{ github.event.inputs.build_kittisu }}" == "true" ]; then
+            JSON="$JSON$COMMA{\"manager\":\"kittisu\",\"susfs\":${{ github.event.inputs.enable_susfs }}}"
           fi
           JSON="$JSON]"
           echo "matrix={\"include\":$JSON}" >> $GITHUB_OUTPUT
@@ -145,7 +145,7 @@ jobs:
 
       - name: Clone kernel source
         run: |
-          git clone --depth=1 -b "${{ inputs.source_ref }}" "https://github.com/${{ inputs.source_repo }}.git" android-kernel
+          git clone --depth=1 -b "${{ github.event.inputs.source_ref }}" "https://github.com/${{ github.event.inputs.source_repo }}.git" android-kernel
 
       - name: Setup Manager and SUSFS
         working-directory: ./android-kernel
@@ -181,9 +181,9 @@ jobs:
           fi
           
           if [ "$USE_SUSFS" == "true" ] && [ "$MANAGER" != "none" ]; then
-            SUSFS_BRANCH="${{ inputs.susfs_version }}"
-            if [ "$SUSFS_BRANCH" == "custom" ] && [ -n "${{ inputs.susfs_ref }}" ]; then
-              SUSFS_BRANCH="${{ inputs.susfs_ref }}"
+            SUSFS_BRANCH="${{ github.event.inputs.susfs_version }}"
+            if [ "$SUSFS_BRANCH" == "custom" ] && [ -n "${{ github.event.inputs.susfs_ref }}" ]; then
+              SUSFS_BRANCH="${{ github.event.inputs.susfs_ref }}"
             fi
             
             git clone --depth=1 -b "$SUSFS_BRANCH" https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu || git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
@@ -223,13 +223,13 @@ jobs:
         run: |
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
           CCACHE_BIN=""
-          [ "${{ inputs.enable_ccache }}" == "true" ] && CCACHE_BIN="ccache"
-          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC="$CCACHE_BIN clang" LOCALVERSION="${{ inputs.kernel_name }}"
+          [ "${{ github.event.inputs.enable_ccache }}" == "true" ] && CCACHE_BIN="ccache"
+          make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC="$CCACHE_BIN clang" LOCALVERSION="${{ github.event.inputs.kernel_name }}"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}${{ inputs.kernel_name }}
+          name: Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}{{ github.event.inputs.kernel_name }}
           path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/Image
           if-no-files-found: ignore
           retention-days: 7
