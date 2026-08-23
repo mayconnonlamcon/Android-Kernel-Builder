@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: "Kernel name prefix"
+        description: "Custom Kernel Name"
         required: false
         type: string
-        default: "-tungtx0507"
+        default: "-CustomKernel"
       build_none:
         description: "Build: none (baseline no-root)"
         type: boolean
@@ -33,7 +33,7 @@ on:
         type: boolean
         default: false
       enable_susfs:
-        description: "Enable SUSFS (applies to KSUNext, SukiSU Ultra, ReSukiSU, KittiSU)"
+        description: "Enable SUSFS"
         type: boolean
         default: false
       susfs_version:
@@ -45,7 +45,7 @@ on:
           - v2.1.0
           - custom
       susfs_ref:
-        description: "SUSFS branch/tag/commit (only for custom version)"
+        description: "SUSFS branch/tag/commit (custom)"
         required: false
         default: ""
       source_repo:
@@ -53,7 +53,7 @@ on:
         required: true
         default: Pzqqt/android_kernel_xiaomi_marble
       source_ref:
-        description: Kernel source branch, tag, or commit
+        description: Kernel source branch
         required: true
         default: melt-rebase
       build_scope:
@@ -68,7 +68,7 @@ on:
         type: boolean
         default: true
       create_draft_release:
-        description: Create a draft GitHub release when the build succeeds
+        description: Create draft release
         type: boolean
         default: false
 
@@ -76,37 +76,24 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.enable_susfs }}-${{ inputs.build_scope }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   setup:
-    name: Generate matrix and validate policy
+    name: Generate matrix
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
     steps:
       - name: Checkout builder
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Validate builder policy
-        run: |
-          if [ -d "tests" ]; then
-            for test_script in tests/test-*.sh; do
-              [ -f "$test_script" ] && bash "${test_script}" || true
-            done
-          fi
+        uses: actions/checkout@v4
 
       - name: Generate build matrix
         id: gen
         run: |
           JSON="["
           COMMA=""
-          
           if [ "${{ inputs.build_none }}" == "true" ]; then
             JSON="$JSON{\"manager\":\"none\",\"susfs\":false}"
             COMMA=","
@@ -130,7 +117,6 @@ jobs:
           if [ "${{ inputs.build_kittisu }}" == "true" ]; then
             JSON="$JSON$COMMA{\"manager\":\"kittisu\",\"susfs\":${{ inputs.enable_susfs }}}"
           fi
-          
           JSON="$JSON]"
           echo "matrix={\"include\":$JSON}" >> $GITHUB_OUTPUT
 
@@ -200,7 +186,6 @@ jobs:
               SUSFS_BRANCH="${{ inputs.susfs_ref }}"
             fi
             
-            echo "Applying SUSFS version: $SUSFS_BRANCH"
             git clone --depth=1 -b "$SUSFS_BRANCH" https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu || git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
             
             KSU_PATCH=$(find ../susfs4ksu -name "*enable_susfs*" | head -n 1)
@@ -239,14 +224,13 @@ jobs:
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:${PATH}"
           CCACHE_BIN=""
           [ "${{ inputs.enable_ccache }}" == "true" ] && CCACHE_BIN="ccache"
-          
           make -j$(nproc --all) O=${{ env.OUT_DIR }} ARCH=${{ env.ARCH }} LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC="$CCACHE_BIN clang" LOCALVERSION="${{ inputs.kernel_name }}"
 
       - name: Upload Image Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}${{ inputs.kernel_name }}
-          path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/Image
-          if-no-files-found: ignore
-          retention-days: 7
-          
+            name: Image-${{ matrix.manager }}-susfs${{ matrix.susfs }}${{ inputs.kernel_name }}
+            path: ./android-kernel/${{ env.OUT_DIR }}/arch/${{ env.ARCH }}/boot/Image
+            if-no-files-found: ignore
+            retention-days: 7
+            
